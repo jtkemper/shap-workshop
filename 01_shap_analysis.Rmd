@@ -1,0 +1,434 @@
+---
+title: "01_shap_analysis"
+author: "JTK"
+date: "2025-12-03"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+# HOUSEKEEPING
+
+## Package Loading
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(lightgbm)
+library(here)
+library(caret)
+library(hydroGOF)
+library(fastshap)
+library(shapviz)
+
+```
+
+## Some global vars
+
+```{r}
+
+### Find your center
+### Tell R where to find us 
+
+here::i_am("01_shap_analysis.Rmd")
+
+
+```
+
+# DATA DOWNLOAD
+
+## Get model training data
+```{r}
+
+# //////////////////////////////////////////////////////////////////////////////
+
+### Download provided .csv files that contain Phosphorus and Chloride obersvations
+### from 18 tributary gages of Lake Champlain, as well as many potential predictors
+### including dynamic discharge (daily discharge, antecedent weekly & montly discharge, etc.)
+### and several static parameters that could potentially drive water quality dynamics
+### See the Excel document within the input-data folder (/input-data/predictor_vars.xlsx)
+### for additional explanation of the predictor variables
+### Each file is 83 columns wide 
+
+### Choose which constituent you are most interested in! Then make sure to edit
+### the relevant calls to make sure the code runs
+
+### The example below is for total phosphorus, which is the constituent 
+### of primary concern within the Lake Champlain Basin 
+### (as well as the broader New England, Mid-Atlantic, and Great Lakes region)
+### 
+
+# //////////////////////////////////////////////////////////////////////////////
+
+### Read-in phosphorus & chloride data
+
+#### Phosphorus 
+
+drivers <- read_csv(here("input", 
+                          "final_dataframes_for_predictions",
+                          "tp_drivers.csv")) 
+
+#### Chloride 
+
+# chlor_drivers <- read_csv(here("input", 
+#                             "final_dataframes_for_predictions",
+#                             "tp_drivers.csv"))
+
+```
+
+# DATA CLEANING & MANIPULATION
+
+
+# MODEL TRAINING
+
+## Feature Selection
+
+### Choose potential features
+```{r}
+# //////////////////////////////////////////////////////////////////////////////
+
+# There are many ways to perform feature selection, whether using random forest
+# and a selection "philosophy" (backwards or forwards selection) or using more
+# advanced techniques as evolutionary algorithms or Bayesian inference 
+# However, that is not a focus of this workshop. Here, we will simply select variables
+# that our expertise suggests are likely to drive phosphorus dynamics 
+
+# For this specific use case, this includes land cover, soils data, population data,
+# basin topography, various dynamic hydrology datasets, and season
+# We will then do a brief correlation analysis to remove high correlated variables
+
+# Feel free to pick your own variables from the list below based on your expertise
+# and curiousity
+# See Excel file in the github repo for variable explanations
+
+names(drivers) 
+
+# Pick the features
+
+pred_feats <- c("water_year",
+                   "log_daily_q",
+                   "mean_prior_monthly_q",
+                   "delta_daily_q",
+                   "season",
+                "lulc_forest",
+                "lulc_developed",
+                #"lulc_agriculture",
+                #"lulc_water_wetland",
+                "all_100m_lulc_forest",
+                "all_100m_lulc_developed",
+                #"all_100m_lulc_agriculture",
+                #"all_100m_lulc_water_wetland",
+                #"drain_density_km_km2",
+                "tot_basin_slope",
+                "pct_ab_soils",
+                #"tot_p97",
+                "tot_ndams2010",
+                "tot_popdens10"
+                #"max_popdens10",
+                #"pct_drained_by_tile"
+                       )
+
+### Now, check for correlations and remove correlated features
+#### Select just the features
+features_for_corr <- drivers %>% dplyr::select(any_of(pred_feats))
+
+#### Calculate correlations
+
+watershed_char_correlations <- cor(features_for_corr %>% 
+                                     dplyr::select(!season),  
+                                   method = "spearman")
+
+#### Calculate statistical significance of correlations
+
+corr_p <- ggcorrplot::cor_pmat(watershed_char_correlations)
+
+coors_plot <- ggcorrplot::ggcorrplot(watershed_char_correlations, 
+                                    p.mat = corr_p)
+coors_plot
+```
+
+### Remove correlated features
+```{r}
+
+#### Remove correlated features
+
+corrs_remove <- caret::findCorrelation(watershed_char_correlations, 
+                                       cutoff = 0.7, 
+                                       names = TRUE,
+                                       exact = TRUE,
+                                       )
+
+### And create the final predictor features dataframe
+
+drivers_selected <- drivers %>%
+  dplyr::select(tributary,
+                date,
+                log_conc,
+                any_of(pred_feats)) %>%
+  dplyr::select(!any_of(corrs_remove))
+
+
+
+# //////////////////////////////////////////////////////////////////////////////
+  
+
+```
+
+## Split into training and testing datasets 
+```{r}
+
+# //////////////////////////////////////////////////////////////////////////////
+
+# Here we split into training (and validation) datasets, and testing datasets
+# With time series data, it is important to retain the temporal structure
+# and so we divide datasets by year rather than a "random" split that is frequently
+# done in non-temporal data. This avoids skewing model performance towards "good"
+# which would occur if, for example, a model was predicting concentration at a timestep
+# for which it had observations on either side of that timestep
+# Of course, splits are ultimately dependant on your research questions. If you 
+# want to use models to fill in gaps, for example, then a "random" split might 
+# be the way to go. Here, are goals are interpretation, and so we do not 
+# want to create a model that may "learn" temporal autocorrelation as the primary 
+# driver of concentration rather than other underlying parameters and processes
+
+# //////////////////////////////////////////////////////////////////////////////
+
+### Split into training data
+
+train_data <- drivers_selected %>% filter(water_year < 2014)
+
+### And testing data
+### Note that we leave a buffer year to account for sample independence
+### and better ensure model generalizability 
+
+test_data <- drivers_selected %>% filter(water_year > 2014)
+
+### Check how the splits shake out in terms of % of the entire sample
+
+### Test split % 
+paste0("Train:", round(nrow(train_data)/sum(nrow(train_data),nrow(test_data))*100, 0),
+                   "% ",
+                   "Test:", round(nrow(test_data)/sum(nrow(train_data),nrow(test_data))*100, 0),
+                   "%")
+            
+```
+
+## Train model
+```{r}
+# 
+
+# First, set up the predictor dataframe as a matrix, which is required for the model
+# We also want to make sure to remove the the response variable (here, log_conc)
+# And a few other variables that are not predictors but we will later use to 
+# to understand model outputs and assess model performance
+
+## Declare predictor variables
+
+preds <- data.matrix(train_data %>%
+                       dplyr::select(!c(log_conc,
+                                        date,
+                                        tributary)))
+
+## And the response variable
+
+response <- train_data$log_conc
+
+### Set up the environment - this is just preparing the dataset API to be used by lightgbm. 
+### This is our training data
+
+train_lgbm <- lgb.Dataset(preds, label = response)
+
+
+### Declare the test data
+
+test_lgbm <- data.matrix(test_data %>%
+                       dplyr::select(!c(log_conc,
+                                        date,
+                                        tributary)))
+
+### Declare the hyperparameters
+### These are defaults but can be adjusted after the tuning process
+### which we won't explore here
+
+hyperparams <- list(objective = "regression",
+                    num_leaves = 31L,
+                    learning_rate = 0.1,
+                    min_data_in_leaf = 20L,
+                    num_threads = 10L)
+
+### Train the model
+                        
+set.seed(913)
+                        
+nutrient_model_lgbm <- lgb.train(hyperparams,
+                                 data = train_lgbm,
+                                 verbose = 1L,
+                                 nrounds = 500L)
+```
+
+# MODEL TESTING
+
+## Make predictions on test data
+```{r}
+### Predict with the model on test data
+
+nutrient_predicted <- predict(nutrient_model_lgbm, newdata = test_lgbm) %>%
+  as_tibble() %>% 
+  rename(log_predicted_conc = 1)
+
+### Bind to observations
+predicted_observed <- bind_cols(nutrient_predicted,
+                                test_data %>%
+                                  rename(log_observed_conc = log_conc)) %>%
+  relocate(log_observed_conc, .after = log_predicted_conc)
+```
+
+## Calculate errors
+```{r}
+
+### Calculate errors
+
+predicted_observed <- predicted_observed %>%
+  mutate(predicted_conc = (10^log_predicted_conc)) %>%
+  mutate(observed_conc = 10^log_observed_conc) %>%
+  mutate(raw_err = predicted_conc - observed_conc) %>%
+  mutate(sqrerr = raw_err^2,
+         abs_error = abs(raw_err),
+         abs_pct_error = abs_error/predicted_conc
+                                 )
+
+
+### And some summary error metrics
+### Note that these are important to do by individual basin rather than 
+### holistically due to the baseline comparisons in the metrics 
+### (such as KGE)
+
+error_summary <- predicted_observed %>% 
+  dplyr::group_by(tributary) %>%
+  summarise(mae = mean(abs_error),
+            rmse = sqrt(mean(sqrerr)),
+            nse = hydroGOF::NSE(predicted_conc, observed_conc),
+            kge = hydroGOF::KGE(predicted_conc, observed_conc),
+            pbias = hydroGOF::pbias(predicted_conc, observed_conc),
+            r2 = hydroGOF::R2(predicted_conc, observed_conc))
+
+### View median across all basins
+
+error_summary %>%
+  summarise(across(where(is.numeric), median))
+
+```
+
+
+# FAST SHAP
+
+## Generate SHAP values
+
+```{r}
+
+# //////////////////////////////////////////////////////////////////////////////
+# Here, we calculate SHAP values for predictions on the test dataset
+# As explained earlier, SHAP values are a game theory based approach that 
+# provides insights into how exactly are being made. We can look at a variety
+# of different values and plots that quantify the contributions of features to 
+# predictions, from the individual prediction scale to the full test dataset.
+# These can help reveal feature interactions and emphasize the phyiscal basis
+# of models. 
+# //////////////////////////////////////////////////////////////////////////////
+
+
+### First create a wrapper function that enables prediction
+### on the test dataset
+
+p_func <- function(model, newdata){
+  
+  predict(model, as.matrix(newdata))
+  
+}
+
+### Then declare a baseline prediction to which SHAP values
+### are related.Traditionally, this is the the mean of the 
+### target parameter in the training dataset
+### SHAP values reflect how much each feature changes the prediciton
+### relative to this baseline value 
+
+baseline <- mean(train_data$log_conc)
+
+### Now, generate the shap values for the nutrient LightGBM model
+### This generates shap values for predictions on the test data
+
+ex_lgbm <- fastshap::explain(
+  nutrient_model_lgbm,
+  X = preds,
+  pred_wrapper = p_func,
+  newdata = test_lgbm,
+  adjust = TRUE,
+  exact = TRUE
+  
+  )
+```
+
+## Make visualizaitons 
+
+### Generate a shapviz visualization object 
+```{r}
+
+
+shv <- shapviz::shapviz(nutrient_model_lgbm,
+                        #X = data.matrix(test_lgbm[60,]),
+                        #baseline = baseline,
+                        X_pred = test_lgbm
+                        )
+```
+
+### Examine feature contributions to an individual prediction
+```{r}
+
+# This is called a waterfall plot and helps to quantify how each feature
+# contributes to any given prediction and adjusts the prediction relative
+# to a baseline. Here we pick the fifth predictions, but you could do this 
+# for any prediction of interest
+
+sv_waterfall(shv, row_id = 5)
+```
+
+### Visualize global values
+```{r}
+### This is what is known as a beeswarm plot and this provides a holistic 
+### overview for how features contribute to predictions and how feature
+### contributions change as feature values change
+
+sv_importance(shv,
+              kind = "beeswarm",
+              viridis_args = list(),
+              show_numbers = TRUE ### Will show mean SHAP on grath
+              )
+```
+
+### Visualize mean shap, which is relatively analogous to traditional feature importance
+```{r}
+
+sv_importance(shv,
+              kind = "bar",
+              fill = "tan4",
+              show_numbers = TRUE)
+```
+
+### And now dependance plots
+```{r}
+
+### Dependance plots better show the relationship between individual feature 
+### values and SHAP values. They can also help examine interactions between
+### features and how those influence SHAP values and, ultimately, model predictions
+
+sv_dependence(shv, 
+              "log_daily_q",
+              color_var = "lulc_forest", # Help examine feature interaction 
+              alpha = 0.5
+              #viridis_args = list()
+              )
+
+```
+
