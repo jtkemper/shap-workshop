@@ -1,0 +1,17 @@
+install.packages(
+ c( 
+  "caret",
+  "dplyr",
+  "fastshap",
+  "ggcorrplot",
+  "here",
+  "holepunch",
+  "hydroGOF",
+  "jsonlite",
+  "knitr",
+  "lightgbm",
+  "rmarkdown",
+  "shapr",
+  "shapviz",
+  "tidyverse")
+)
