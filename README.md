@@ -7,7 +7,7 @@ Below is a link to a badge that will launch a remote version of **RStudio** wher
 [![Launch RStudio Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/jtkemper/shap-workshop/main?urlpath=rstudio)
 <!-- badges: end -->
 
-And here a link to run it in a **Jupyter notebook**, if that is more comfortable.
+And here is a link to run it in a **Jupyter notebook**, if that is a more familiar dashboard.
 
 <!-- badges: start -->
 [![Launch Jupyter Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/jtkemper/shap-workshop/main?urlpath=%2Fdoc%2Ftree%2F01_shap_analysis.ipynb)
