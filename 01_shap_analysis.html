@@ -413,7 +413,7 @@ drivers &lt;- read_csv(here(&quot;input&quot;,
 ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.</code></pre>
 <pre class="r"><code>#### Chloride 
 
-# chlor_drivers &lt;- read_csv(here(&quot;input&quot;, 
+# drivers &lt;- read_csv(here(&quot;input&quot;, 
 #                             &quot;final_dataframes_for_predictions&quot;,
 #                             &quot;tp_drivers.csv&quot;))</code></pre>
 </div>
@@ -443,7 +443,7 @@ drivers &lt;- read_csv(here(&quot;input&quot;,
 # and curiousity
 # See Excel file in the github repo for variable explanations
 
-names(drivers) </code></pre>
+names(drivers)</code></pre>
 <pre><code>##  [1] &quot;tributary&quot;                   &quot;site_no&quot;                    
 ##  [3] &quot;date&quot;                        &quot;water_year&quot;                 
 ##  [5] &quot;log_daily_q&quot;                 &quot;mean_prior_weekly_q&quot;        
@@ -486,6 +486,9 @@ names(drivers) </code></pre>
 ## [79] &quot;tot_popdens10&quot;               &quot;cat_popdens10&quot;              
 ## [81] &quot;tot_total_road_dens&quot;         &quot;max_popdens10&quot;              
 ## [83] &quot;group_id&quot;</code></pre>
+</div>
+<div id="now-select-the-features-youd-like-an-examine-correlations" class="section level3">
+<h3>Now, select the features you’d like an examine correlations</h3>
 <pre class="r"><code># Pick the features
 
 pred_feats &lt;- c(&quot;water_year&quot;,
@@ -558,8 +561,20 @@ drivers_selected &lt;- drivers %&gt;%
   dplyr::select(!any_of(corrs_remove))
 
 
-
-# //////////////////////////////////////////////////////////////////////////////</code></pre>
+head(drivers_selected)</code></pre>
+<pre><code>## # A tibble: 6 × 14
+##   tributary     date       log_conc water_year log_daily_q mean_prior_monthly_q
+##   &lt;chr&gt;         &lt;date&gt;        &lt;dbl&gt;      &lt;dbl&gt;       &lt;dbl&gt;                &lt;dbl&gt;
+## 1 Ausable River 1990-04-03    1.34        1990       -1.40                -1.65
+## 2 Ausable River 1990-04-05    1.60        1990       -1.06                -1.59
+## 3 Ausable River 1990-04-09    0.954       1990       -1.64                -1.49
+## 4 Ausable River 1990-04-11    1.40        1990       -1.19                -1.47
+## 5 Ausable River 1990-04-18    0.954       1990       -1.58                -1.54
+## 6 Ausable River 1990-04-20    0.954       1990       -1.68                -1.57
+## # ℹ 8 more variables: delta_daily_q &lt;dbl&gt;, season &lt;chr&gt;, lulc_forest &lt;dbl&gt;,
+## #   all_100m_lulc_forest &lt;dbl&gt;, all_100m_lulc_developed &lt;dbl&gt;,
+## #   pct_ab_soils &lt;dbl&gt;, tot_ndams2010 &lt;dbl&gt;, tot_popdens10 &lt;dbl&gt;</code></pre>
+<pre class="r"><code># //////////////////////////////////////////////////////////////////////////////</code></pre>
 </div>
 </div>
 <div id="split-into-training-and-testing-datasets" class="section level2">
@@ -650,11 +665,15 @@ nutrient_model_lgbm &lt;- lgb.train(hyperparams,
                                  data = train_lgbm,
                                  verbose = 1L,
                                  nrounds = 500L)</code></pre>
-<pre><code>## [LightGBM] [Info] Auto-choosing col-wise multi-threading, the overhead of testing was 0.001888 seconds.
+<pre><code>## [LightGBM] [Info] Auto-choosing col-wise multi-threading, the overhead of testing was 0.001424 seconds.
 ## You can set `force_col_wise=true` to remove the overhead.
 ## [LightGBM] [Info] Total Bins 899
 ## [LightGBM] [Info] Number of data points in the train set: 6566, number of used features: 11
 ## [LightGBM] [Info] Start training from score 1.758784</code></pre>
+<pre class="r"><code>nutrient_model_lgbm</code></pre>
+<pre><code>## LightGBM Model (500 trees)
+## Objective: regression
+## Fitted to dataset with 11 columns</code></pre>
 </div>
 </div>
 <div id="model-testing" class="section level1">
@@ -754,7 +773,30 @@ ex_lgbm &lt;- fastshap::explain(
   adjust = TRUE,
   exact = TRUE
   
-  )</code></pre>
+  )
+
+head(ex_lgbm)</code></pre>
+<pre><code>##         water_year log_daily_q mean_prior_monthly_q delta_daily_q       season
+## [1,] -0.0439864254  0.03472679          -0.07146893     0.0239538  0.007842969
+## [2,]  0.0009578922  0.31639462          -0.05833794    -0.0722130  0.005732672
+## [3,] -0.0727558596 -0.10235845          -0.19841116    -0.0884310 -0.006003181
+## [4,]  0.0241457687  0.14271435          -0.16817425     0.1650617  0.008527503
+## [5,] -0.0692200301 -0.08666826          -0.12774829    -0.0656121 -0.009135467
+## [6,] -0.0511549452 -0.06952320          -0.11517253    -0.0858574 -0.008965337
+##      lulc_forest all_100m_lulc_forest all_100m_lulc_developed pct_ab_soils
+## [1,]  -0.2758484          0.003891092             -0.05553211  -0.02915855
+## [2,]  -0.2131425         -0.022807515             -0.08159629  -0.01655169
+## [3,]  -0.3306457         -0.007211655             -0.04270527  -0.01772225
+## [4,]  -0.2635766          0.019811443             -0.07720853  -0.03702573
+## [5,]  -0.3001465         -0.011863143             -0.03816495  -0.02206804
+## [6,]  -0.2923939         -0.001652172             -0.03838990  -0.02271145
+##      tot_ndams2010 tot_popdens10
+## [1,]  -0.013213836   -0.02560342
+## [2,]  -0.001054983   -0.01895782
+## [3,]  -0.008387672   -0.01955326
+## [4,]  -0.022526037   -0.01590435
+## [5,]  -0.004619481   -0.02675445
+## [6,]  -0.002287958   -0.02751126</code></pre>
 </div>
 <div id="make-visualizaitons" class="section level2">
 <h2>Make visualizaitons</h2>

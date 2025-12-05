@@ -3,8 +3,8 @@ title: "01_shap_analysis"
 author: "JTK"
 date: "2025-12-03"
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 editor_options:
   chunk_output_type: console
 ---
