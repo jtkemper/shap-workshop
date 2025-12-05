@@ -72,7 +72,7 @@ drivers <- read_csv(here("input",
 
 #### Chloride 
 
-# chlor_drivers <- read_csv(here("input", 
+# drivers <- read_csv(here("input", 
 #                             "final_dataframes_for_predictions",
 #                             "tp_drivers.csv"))
 
@@ -103,8 +103,11 @@ drivers <- read_csv(here("input",
 # and curiousity
 # See Excel file in the github repo for variable explanations
 
-names(drivers) 
+names(drivers)
+```
 
+### Now, select the features you'd like an examine correlations
+```{r}
 # Pick the features
 
 pred_feats <- c("water_year",
@@ -170,7 +173,7 @@ drivers_selected <- drivers %>%
   dplyr::select(!any_of(corrs_remove))
 
 
-
+head(drivers_selected)
 # //////////////////////////////////////////////////////////////////////////////
   
 
@@ -266,6 +269,8 @@ nutrient_model_lgbm <- lgb.train(hyperparams,
                                  data = train_lgbm,
                                  verbose = 1L,
                                  nrounds = 500L)
+
+nutrient_model_lgbm
 ```
 
 # MODEL TESTING
@@ -368,6 +373,8 @@ ex_lgbm <- fastshap::explain(
   exact = TRUE
   
   )
+
+head(ex_lgbm)
 ```
 
 ## Make visualizaitons 
